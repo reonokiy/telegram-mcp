@@ -1,0 +1,59 @@
+name: Build and publish image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build candidate
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          load: true
+          tags: telegram-mcp:check
+      - name: Exercise HTTP transport with no Telegram connection
+        run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges
+          --tmpfs /tmp:rw,nosuid,nodev,size=64m,uid=10001,gid=10001
+          --tmpfs /data:rw,nosuid,nodev,size=64m,uid=10001,gid=10001
+          --entrypoint python telegram-mcp:check /opt/smoke.py
+      - name: Authenticate to GHCR
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested revision
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        id: publish
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/reonokiy/telegram-mcp:sha-${{ github.sha }}
+      - name: Record immutable image reference
+        if: steps.publish.outcome == 'success'
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: echo "ghcr.io/reonokiy/telegram-mcp@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
