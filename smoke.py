@@ -31,7 +31,7 @@ async def main():
                 if serving.done():
                     await serving
                 try:
-                    response = await client.get("/mcp", headers=headers)
+                    response = await client.get("/mcp", headers={**headers, "Accept": "application/json"})
                     if response.status_code == 200:
                         break
                 except httpx.ConnectError:
